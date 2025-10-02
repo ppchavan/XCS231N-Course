@@ -1,0 +1,29 @@
+🐍
+import json
+
+# Load the points.json for this assignment
+with open(f'../points.json', 'r') as f:
+  points = json.load(f)
+
+# Load the meta.json for this assignment
+with open(f'../meta.json', 'r') as f:
+  meta = json.load(f)
+
+
+has_written = len([q for q in points.values() if q['is_written']]) > 0
+has_coding = len([q for q in points.values() if not q['is_written']]) > 0
+has_online = len([q for q in points.values() if q['is_online']]) > 0
+
+
+if has_written or has_coding:
+  print('{\\bf Submission Instructions}\n\n')
+if has_written:
+  with open('00-instructions/02-0-written-submission.tex', 'r') as f: print(f.read())
+if has_coding:
+  if meta['notebook_submission']:
+    with open('00-instructions/02-4-notebook-submission.tex', 'r') as f: print(f.read())
+  if meta['inline_submission']:
+    with open('00-instructions/02-5-inline-submission.tex', 'r') as f: print(f.read())
+if has_online:
+  with open('00-instructions/02-3-online-submission.tex', 'r') as f: print(f.read())
+🐍
