@@ -44,11 +44,10 @@ the ~src/~ subdirectory:
 $ python grader.py 3a-0-basic
 \end{lstlisting}
 
-Before beginning this course, please walk through the
-\href{https://github.com/scpd-proed/General_Handouts/blob/master/Anaconda_Setup.pdf}{Anaconda
-Setup for XCS Courses} to familiarize yourself with
-the coding environment.  Use the env defined in ~src/environment.yml~
-to run your code.  This is the same environment used by the online autograder.''')
+Before beginning this course, please walk through ~docs/uv_setup.md~ to familiarize yourself with
+the coding environment.  Use the env you install from this guide to run your code.  
+For a guided video walkthrough on how to setup your coding environment, \href{https://drive.google.com/file/d/11C4dHUx1jyzS0IfHeT4Ua_CS0LiAbyWy/view?usp=drive_link}{please consult our video walkthrough}.
+This is the same environment used by the online autograder.''')
 
 if has_coding and meta['multifile_coding_submission']:
   print(R'''{\bf Writing Code and Running the Autograder}
