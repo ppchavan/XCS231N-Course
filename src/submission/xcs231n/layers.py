@@ -178,6 +178,7 @@ def batchnorm_forward(x, gamma, beta, bn_param):
 
     out, cache = None, None
     if mode == "train":
+        pass
         #######################################################################
         # TODO: Implement the training-time forward pass for batch norm.      #
         # Use minibatch statistics to compute the mean and variance, use      #
@@ -205,6 +206,7 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         #                           END OF YOUR CODE                          #
         #######################################################################
     elif mode == "test":
+        pass
         #######################################################################
         # TODO: Implement the test-time forward pass for batch normalization. #
         # Use the running mean and variance to normalize the incoming data,   #
@@ -394,6 +396,7 @@ def dropout_forward(x, dropout_param):
     out = None
 
     if mode == "train":
+        pass
         #######################################################################
         # TODO: Implement training phase forward pass for inverted dropout.   #
         # Store the dropout mask in the mask variable.                        #
@@ -404,6 +407,7 @@ def dropout_forward(x, dropout_param):
         #                           END OF YOUR CODE                          #
         #######################################################################
     elif mode == "test":
+        pass
         #######################################################################
         # TODO: Implement the test phase forward pass for inverted dropout.   #
         #######################################################################
@@ -431,6 +435,7 @@ def dropout_backward(dout, cache):
 
     dx = None
     if mode == "train":
+        pass
         #######################################################################
         # TODO: Implement training phase backward pass for inverted dropout   #
         #######################################################################
