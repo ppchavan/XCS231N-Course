@@ -9,7 +9,9 @@ if command -v wget >/dev/null 2>&1; then
     tar -xzvf cifar-10-python.tar.gz
     rm cifar-10-python.tar.gz
   fi
-  wget http://cs231n.stanford.edu/imagenet_val_25.npz
+  if [ ! -f "imagenet_val_25.npz" ]; then
+    wget http://cs231n.stanford.edu/imagenet_val_25.npz
+  fi
   if [ ! -d "coco_captioning" ]; then
       wget "http://cs231n.stanford.edu/coco_captioning.zip"
       unzip coco_captioning.zip
@@ -24,7 +26,9 @@ elif command -v curl >/dev/null 2>&1; then
     tar -xzvf cifar-10-python.tar.gz
     rm cifar-10-python.tar.gz
   fi
-  curl -L http://cs231n.stanford.edu/imagenet_val_25.npz -o imagenet_val_25.npz
+  if [ ! -f "imagenet_val_25.npz" ]; then
+    curl -L http://cs231n.stanford.edu/imagenet_val_25.npz -o imagenet_val_25.npz
+  fi
   if [ ! -d "coco_captioning" ]; then
       curl -L "http://cs231n.stanford.edu/coco_captioning.zip" -o coco_captioning.zip
       unzip coco_captioning.zip
