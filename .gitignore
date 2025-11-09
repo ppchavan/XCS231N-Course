@@ -1,0 +1,4 @@
+src/submission/xcs231n/datasets/cifar-10-batches-py
+src/submission/xcs231n/datasets/coco_captioning
+src/submission/xcs231n/datasets/imagenet_val_25.npz
+*.pyc

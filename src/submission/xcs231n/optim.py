@@ -68,6 +68,10 @@ def sgd_momentum(w, dw, config=None):
     # the next_w variable. You should also use and update the velocity v.     #
     ###########################################################################
     # ### START CODE HERE ###
+    mu = config["momentum"]
+    learning_rate = config["learning_rate"]
+    v = mu * v - learning_rate * dw  # update velocity
+    next_w = w + v  # update weights
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -103,6 +107,13 @@ def rmsprop(w, dw, config=None):
     # config['cache'].                                                        #
     ###########################################################################
     # ### START CODE HERE ###
+    learning_rate = config["learning_rate"]
+    decay_rate = config["decay_rate"]
+    epsilon = config["epsilon"]
+    cache = config["cache"]
+    cache = decay_rate * cache + (1 - decay_rate) * (dw ** 2)
+    next_w = w - learning_rate * dw / (np.sqrt(cache) + epsilon)
+    config["cache"] = cache
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -145,6 +156,21 @@ def adam(w, dw, config=None):
     # using it in any calculations.                                           #
     ###########################################################################
     # ### START CODE HERE ###
+    learning_rate = config["learning_rate"]
+    beta1 = config["beta1"]
+    beta2 = config["beta2"]
+    epsilon = config["epsilon"]
+    m = config["m"]
+    v = config["v"]
+    t = config["t"] + 1  # increment t
+    m = beta1 * m + (1 - beta1) * dw  # update biased first moment estimate
+    v = beta2 * v + (1 - beta2) * (dw ** 2)  # update biased second moment estimate
+    m_hat = m / (1 - beta1 ** t)  # compute bias-corrected first moment estimate
+    v_hat = v / (1 - beta2 ** t)  # compute bias-c
+    next_w = w - learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)  # update weights
+    config["m"] = m
+    config["v"] = v
+    config["t"] = t
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
