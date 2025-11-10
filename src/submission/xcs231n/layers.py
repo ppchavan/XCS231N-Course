@@ -557,24 +557,35 @@ def conv_forward_naive(x, w, b, conv_param):
     # Hint: you can use the function np.pad for padding.                      #
     ###########################################################################
     # ### START CODE HERE ###
-    N, C, H, W = x.shape
-    F, _, HH, WW = w.shape
+    # Extract dimensions and parameters from inputs
+    N, C, H, W = x.shape            # Input dimensions
+    F, _, HH, WW = w.shape          # Filter dimensions where HH and WW are height and width of filter
     stride = conv_param['stride']
     pad = conv_param['pad']
+    
+    # Calculate output dimensions
     H_out = 1 + (H + 2 * pad - HH) // stride
     W_out = 1 + (W + 2 * pad - WW) // stride
     out = np.zeros((N, F, H_out, W_out))
-    x_padded = np.pad(x, ((0,), (0,), (pad,), (pad,)), mode='constant')
-    for n in range(N):
-        for f in range(F):
-            for i in range(H_out):
-                for j in range(W_out):
-                    h_start = i * stride
+
+    # Pad the input in order to preserve spatial dimensions after convolution
+    x_padded = np.pad(x, ((0,0), (0,0), (pad,pad), (pad,pad)), mode='constant')
+
+    # Perform the convolution operation
+    for point in range(N):  # Loop over each point
+        for filter in range(F):  # loop over each filter
+            for h_out_index in range(H_out):
+                for w_out_index in range(W_out):
+                    # Calculate top left corner of the current "slice"
+                    h_start = h_out_index * stride
+                    w_start = w_out_index * stride
                     h_end = h_start + HH
-                    w_start = j * stride
                     w_end = w_start + WW
-                    window = x_padded[n, :, h_start:h_end, w_start:w_end]
-                    out[n, f, i, j] = np.sum(window * w[f]) + b[f]
+
+                    receptive_field = x_padded[point, :, h_start:h_end, w_start:w_end]
+
+                    #Perform convolution operation (element-wise multiplication and sum = Wx + b)
+                    out[point, filter, h_out_index, w_out_index] = np.sum(receptive_field * w[filter]) + b[filter]
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -600,6 +611,79 @@ def conv_backward_naive(dout, cache):
     # TODO: Implement the convolutional backward pass.                        #
     ###########################################################################
     # ### START CODE HERE ###
+    """
+    1. Unpack Cache and Initialize Gradients
+    Unpack: Retrieve x, w, b, and conv_param from the cache tuple. Also extract stride, pad, and all dimensions (N, C, H, W, F, HH, WW, H', W').
+    Initialize Gradients:
+    db should be an array of zeros with shape (F,).
+    dw should be an array of zeros with shape (F, C, HH, WW).
+    dx should be an array of zeros with the same shape as the original input x (N, C, H, W).
+    Pad Input x: Create x_padded using np.pad, just like in the forward pass. You will also need a padded version of dx called dx_padded (same shape as x_padded), which you will accumulate gradients into.
+    
+    2. Calculate db (Gradient with respect to bias)
+    db is the easiest. Since each bias b[f] was added uniformly across its entire output feature map (F, H', W'), the gradient of the bias (db[f]) is simply the sum of all upstream gradients (dout) for that specific filter/feature map.
+    Hint: Use np.sum(dout, axis=(0, 2, 3)) to sum over the N, H', and W' dimensions of dout.
+    
+    3. Calculate dw (Gradient with respect to weights)
+    dw has the same shape as w (F, C, HH, WW).
+    You need nested loops similar to the forward pass (over N, F, H', W').
+    At each location in the loop:
+    Extract the corresponding receptive_field from x_padded (same slicing logic as forward pass).
+    The update to the weight gradient dw[f, c, hh, ww] is the value of the input receptive_field[c, hh, ww] multiplied by the upstream gradient value dout[n, f, h, w].
+    Hint: Use accumulation: dw[f] += receptive_field * dout[n, f, h, w]. This accumulation happens across all N, H', and W' positions.
+    
+    4. Calculate dx (Gradient with respect to input x)
+    This is the most complex part. We are backpropagating the gradients through the convolution operation itself.
+    Again, use the same nested loops (over N, F, H', W').
+    At each location:
+    We need to distribute the upstream gradient dout[n, f, h, w] across the entire input region that the filter touched (the receptive field).
+    The contribution to the input gradient is dx_padded[n, :, h_start:h_end, w_start:w_end] += w[f] * dout[n, f, h, w].
+    Hint: You are effectively performing a deconvolution or transposed convolution operation here with the flipped filter weights.
+    Final Step for dx: After accumulating all gradients into dx_padded, you must unpad it to match the original x shape.
+    Hint: Slice dx_padded to remove the borders you added initially. If pad was 1, slice off 1 pixel from each side: dx = dx_padded[n, :, pad:H+pad, pad:W+pad] (adjust slicing for the N and C dimensions).
+    """
+    # Unpack: Retrieve x, w, b, and conv_param from the cache tuple. Also extract stride, pad, and all dimensions (N, C, H, W, F, HH, WW, H', W').
+    (x, w, b, conv_param) = cache
+    stride = conv_param['stride']
+    pad = conv_param['pad']
+
+    # Retrieve dimensions
+    N, C, H, W = x.shape            # Input dimensions
+    F, _, HH, WW = w.shape          # Filter dimensions
+    H_out = 1 + (H + 2 * pad - HH) // stride
+    W_out = 1 + (W + 2 * pad - WW) // stride
+
+    # Initialize gradients
+    db = np.zeros((F,))
+    dw = np.zeros((F, C, HH, WW))
+    dx = np.zeros((N, C, H, W))
+    x_padded = np.pad(x, ((0,0), (0,0), (pad,pad), (pad,pad)), mode='constant')
+    dx_padded = np.zeros_like(x_padded)
+
+    # 2. Calculate db (Gradient with respect to bias)
+    db = np.sum(dout, axis=(0, 2, 3))  # Sum over N, H', W' dimensions
+    
+    # 3. Calculate dw (Gradient with respect to weights)
+    for point in range(N):  # Loop over each point
+        for filter in range(F):  # loop over each filter
+            for h_out_index in range(H_out):
+                for w_out_index in range(W_out):
+                    # Calculate top left corner of the current "slice"
+                    h_start = h_out_index * stride
+                    w_start = w_out_index * stride
+                    h_end = h_start + HH
+                    w_end = w_start + WW
+
+                    receptive_field = x_padded[point, :, h_start:h_end, w_start:w_end]
+
+                    # Update dw
+                    dw[filter] += receptive_field * dout[point, filter, h_out_index, w_out_index]
+
+                    # 4. Calculate dx (Gradient with respect to input x)
+                    dx_padded[point, :, h_start:h_end, w_start:w_end] += w[filter] * dout[point, filter, h_out_index, w_out_index]
+    
+    # Final Step for dx: Unpad dx_padded to match original x shape
+    dx = dx_padded[:, :, pad:pad+H, pad:pad+W]
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -632,6 +716,42 @@ def max_pool_forward_naive(x, pool_param):
     # TODO: Implement the max-pooling forward pass                            #
     ###########################################################################
     # ### START CODE HERE ###
+    """ Here impleemntation is very similar to convolution forward pass but no padding is applied.
+        Also, there are no multiple filters and no weights and biases involved.
+        Instead, we first calculate shape and contents of receptive field and 
+        take the maximum value from that region as the result. And fill the output accordingly.
+    """
+    # Extract dimensions and parameters from inputs
+    N, C, H, W = x.shape            # Input dimensions: N num layers, C channels, H height, W width
+    stride = pool_param['stride']
+    pool_h = pool_param['pool_height']
+    pool_w = pool_param['pool_width']
+    
+    # Calculate output dimensions
+    H_out = 1 + (H - pool_h) // stride
+    W_out = 1 + (W - pool_w) // stride
+    
+    # Initialize output
+    out = np.zeros((N, C, H_out, W_out))
+
+    # Perform the max pool operation
+    for point in range(N):  # Loop over each point
+        for h_out_index in range(H_out):
+            for w_out_index in range(W_out):
+                # Calculate top left corner of the current "slice"
+                h_start = h_out_index * stride
+                w_start = w_out_index * stride
+                h_end = h_start + pool_h
+                w_end = w_start + pool_w
+                
+                # Get the receptive field
+                receptive_field = x[point, :, h_start:h_end, w_start:w_end]
+
+                # Perform max pooling operation (get the max element in the receptive field
+                # ensure that we collapse the H and W dimensions and only keep C dimension for commputing
+                # max value)
+                out[point, :, h_out_index, w_out_index] = np.max(receptive_field, axis=(1, 2))
+    
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -655,6 +775,56 @@ def max_pool_backward_naive(dout, cache):
     # TODO: Implement the max-pooling backward pass                           #
     ###########################################################################
     # ### START CODE HERE ###
+    """
+        1. Retrieve Information from cache: Unpack x and pool_param from the cache.
+        2. Initialize dx: Create a NumPy array of zeros dx with the same shape as the original input x.
+        3. Iterate Over Output Grid: Use nested loops that mirror the forward pass (N, C, H_out, W_out).
+        4. Identify the Winning Index: For each pooling window:
+            a. Extract the receptive field (just like the forward pass).
+            b. Find the location (index/mask) of the maximum value within that 2D window using NumPy functions like np.argmax() or by creating a boolean mask.
+        5. Route the Gradient: Take the upstream gradient value dout[n, c, h_out, w_out] and place it only into the corresponding "winning" position in your dx array, leaving all other positions in that window as zero.
+        6. No dw or db: No not need to calculate or return dw or db, as pooling layers have no weights or biases
+    """
+    x, pool_param = cache
+    N, C, H, W = x.shape            # Input dimensions
+    
+    stride = pool_param['stride']
+    pool_h = pool_param['pool_height']
+    pool_w = pool_param['pool_width']
+
+    # Calculate output dimensions
+    H_out = 1 + (H - pool_h) // stride
+    W_out = 1 + (W - pool_w) // stride
+    
+    dx = np.zeros_like(x)
+
+    # Perform the max pool backward operation
+    for point in range(N):  # Loop over each point
+        for channel in range(C):
+            for h_out_index in range(H_out):
+                for w_out_index in range(W_out):
+                    # Calculate top left corner of the current "slice"
+                    h_start = h_out_index * stride
+                    w_start = w_out_index * stride
+                    h_end = h_start + pool_h
+                    w_end = w_start + pool_w
+
+                    receptive_field = x[point, channel, h_start:h_end, w_start:w_end]
+                    
+                    max_flat_idx = np.argmax(receptive_field)
+                    
+                    # np.divmod() performs two operations simultaneously: integer division and mod (remainder)
+                    # It takes two numbers (a and b) and returns a tuple (a // b, a % b)
+                    # It translates the 1D "winning index" back into its corresponding 2D relative coordinates
+                    h_rel, w_rel = np.divmod(max_flat_idx, pool_w)
+                    
+                    # Calculate the absolute coordinates in the original input image
+                    h_abs = h_start + h_rel
+                    w_abs = w_start + w_rel
+
+                    # Route the gradient
+                    dx[point, channel, h_abs, w_abs] += dout[point, channel, h_out_index, w_out_index]
+    
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -693,6 +863,10 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
     # ### START CODE HERE ###
+    N, C, H, W = x.shape
+    x_reshaped = x.transpose(0, 2, 3, 1).reshape(-1, C)  # Reshape to (N*H*W, C)
+    out_reshaped, cache = batchnorm_forward(x_reshaped, gamma, beta, bn_param)
+    out = out_reshaped.reshape(N, H, W, C).transpose(0, 3, 1, 2)  # Reshape back to (N, C, H, W)
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -723,6 +897,10 @@ def spatial_batchnorm_backward(dout, cache):
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
     # ### START CODE HERE ###
+    N, C, H, W = dout.shape
+    dout_reshaped = dout.transpose(0, 2, 3, 1).reshape(-1, C)  # Reshape to (N*H*W, C)
+    dx_reshaped, dgamma, dbeta = batchnorm_backward(dout_reshaped, cache)
+    dx = dx_reshaped.reshape(N, H, W, C).transpose(0, 3, 1, 2)  # Reshape back to (N, C, H, W)
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -761,6 +939,14 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     # and layer normalization!                                                #
     ###########################################################################
     # ### START CODE HERE ###
+    N, C, H, W = x.shape
+    x_grouped = x.reshape(N, G, C // G, H, W)  # Reshape to (N, G, C//G, H, W)
+    mean = np.mean(x_grouped, axis=(2, 3, 4), keepdims=True)
+    var = np.var(x_grouped, axis=(2, 3, 4), keepdims=True)
+    x_normalized = (x_grouped - mean) / np.sqrt(var + eps)
+    x_normalized = x_normalized.reshape(N, C, H, W)  # Reshape back to (N, C, H, W)
+    out = gamma * x_normalized + beta
+    cache = (x, x_normalized, mean, var, gamma, beta, G, eps)
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -787,6 +973,28 @@ def spatial_groupnorm_backward(dout, cache):
     # This will be extremely similar to the layer norm implementation.        #
     ###########################################################################
     # ### START CODE HERE ###
+    x, x_normalized, mean, var, gamma, beta, G, eps = cache
+    N, C, H, W = x.shape
+    
+    # Gradient w.r.t. beta
+    dbeta = np.sum(dout, axis=(0, 2, 3), keepdims=True)
+    
+    # Gradient w.r.t. gamma
+    dgamma = np.sum(dout * x_normalized, axis=(0, 2, 3), keepdims=True)
+    
+    # Gradient w.r.t. x
+    dx_normalized = dout * gamma
+    dx_normalized_grouped = dx_normalized.reshape(N, G, C // G, H, W)
+    x_grouped = x.reshape(N, G, C // G, H, W)
+    mean = mean
+    var = var
+    group_size = (C // G) * H * W
+    dx_grouped = (1. / group_size) * (var + eps) ** (-1. / 2.) * (
+        group_size * dx_normalized_grouped
+        - np.sum(dx_normalized_grouped, axis=(2, 3, 4), keepdims=True)
+        - (x_grouped - mean) * (var + eps) ** (-1.0) * np.sum(dx_normalized_grouped * (x_grouped - mean), axis=(2, 3, 4), keepdims=True)
+    )
+    dx = dx_grouped.reshape(N, C, H, W)
     # ### END CODE HERE ###
     ###########################################################################
     #                             END OF YOUR CODE                            #
