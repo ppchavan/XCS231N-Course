@@ -44,6 +44,7 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     # TODO: Implement a single forward step for the vanilla RNN.                 #
     ##############################################################################
     # ### START CODE HERE ###
+    next_h = torch.tanh(x @ Wx + prev_h @ Wh + b)
     # ### END CODE HERE ###
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -75,6 +76,14 @@ def rnn_forward(x, h0, Wx, Wh, b):
     # above. You can use a for loop to help compute the forward pass.            #
     ##############################################################################
     # ### START CODE HERE ###
+    N, T, D = x.shape
+    H = h0.shape[1]
+    h = torch.zeros((N, T, H), dtype=h0.dtype, device=h0.device)
+    prev_h = h0
+    for t in range(T):
+        next_h = rnn_step_forward(x[:, t, :], prev_h, Wx, Wh, b)
+        h[:, t, :] = next_h
+        prev_h = next_h
     # ### END CODE HERE ###
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -104,6 +113,7 @@ def word_embedding_forward(x, W):
     # HINT: This can be done in one line using Pytorch's array indexing.         #
     ##############################################################################
     # ### START CODE HERE ###
+    out = W[x]
     # ### END CODE HERE ###
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -232,7 +242,7 @@ def temporal_softmax_loss(x, y, mask, verbose=False):
     y_flat = y.reshape(N * T)
     mask_flat = mask.reshape(N * T)
 
-    loss = torch.nn.functional.cross_entropy(x_flat, y_flat, reduction='none')
+    loss = torch.nn.functional.cross_entropy(x_flat, y_flat.long(), reduction='none')
     loss = loss * mask_flat.float()
     loss = loss.sum() / N
 

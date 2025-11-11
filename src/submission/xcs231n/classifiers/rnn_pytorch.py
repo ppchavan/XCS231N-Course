@@ -139,6 +139,17 @@ class CaptioningRNN:
         # You also don't have to implement the backward pass.                      #
         ############################################################################
         # ### START CODE HERE ###
+        
+        h0 = features @ W_proj + b_proj  # Shape: (N, H)        
+        x = W_embed[captions_in]  # Shape: (N, T, W)
+        
+        if self.cell_type == "rnn":
+            h = rnn_forward(x, h0, Wx, Wh, b)  # Shape: (N, T, H)
+        else:  # self.cell_type == "lstm"
+            h = lstm_forward(x, h0, Wx, Wh, b)  # Shape: (N, T, H)
+        
+        scores = temporal_affine_forward(h, W_vocab, b_vocab)  # Shape: (N, T, V)
+        loss = temporal_softmax_loss(scores, captions_out, mask)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -204,6 +215,21 @@ class CaptioningRNN:
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
         # ### START CODE HERE ###
+        h_prev = features @ W_proj + b_proj  # Initial hidden state (N, H)
+        if self.cell_type == "lstm":
+            c_prev = torch.zeros_like(h_prev)  # Initial cell state (N, H)
+        current_word = torch.full((N,), self._start, dtype=torch.long)  # Start token (N,)
+        for t in range(max_length):
+            x = W_embed[current_word]  # Embed current word (N, W)
+            if self.cell_type == "rnn":
+                h_next = rnn_step_forward(x, h_prev, Wx, Wh, b)  # Next hidden state (N, H)
+            else:  # self.cell_type == "lstm"
+                h_next, c_next = lstm_step_forward(x, h_prev, c_prev, Wx, Wh, b)  # Next hidden & cell state (N, H)
+                c_prev = c_next  # Update cell state
+            scores = h_next @ W_vocab + b_vocab  # Scores for all vocab words (N, V)
+            current_word = torch.argmax(scores, dim=1)  # Next word (N,)
+            captions[:, t] = current_word  # Store sampled word
+            h_prev = h_next  # Update hidden state
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
