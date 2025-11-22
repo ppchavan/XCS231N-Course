@@ -1,0 +1,3 @@
+*.npz
+*.pyc
+/src/submission/xcs231n/datasets/coco_captioning/
