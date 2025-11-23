@@ -20,6 +20,15 @@ def sim(z_i, z_j):
     ##############################################################################
 
     # ### START CODE HERE ###
+    # Calculate the dot product of the two vectors (numerator: z_i . z_j)
+    dot_product = torch.dot(z_i.flatten(), z_j.flatten())
+
+    # Calculate the L2 norm (magnitude) of each vector (denominator: || z_i || * || z_j ||)
+    norm_i = torch.linalg.norm(z_i, ord=2)
+    norm_j = torch.linalg.norm(z_j, ord=2)
+    
+    # Normalize the dot product
+    norm_dot_product = dot_product / (norm_i * norm_j)
     # ### END CODE HERE ###
 
     ##############################################################################
@@ -57,6 +66,41 @@ def simclr_loss_naive(out_left, out_right, tau):
         # Hint: Compute l(k, k+N) and l(k+N, k).                                     #
         ##############################################################################
         # ### START CODE HERE ###
+        # 1. Calculate Loss for the First Sample in the Pair        
+        # 1 a. Calculate Numerator: Computes the similarity between the positive pair (z_k and z_k_N) 
+        # and applies the temperature-scaled exponential (\(\exp (\text{sim}(z_{k},z_{kN})/\tau )\))
+        numerator_k = torch.exp(sim(z_k, z_k_N) / tau)
+
+        # 1 b. Calculate Denominator: Uses an inner loop to sum the temperature-scaled exponentials 
+        # of the similarity between z_k and every other vector z_m in the entire 2N batch 
+        # (excluding itself). This sum acts as the normalization term.
+        denominator_k = 0
+        for m in range(2 * N):
+            if m != k:
+                denominator_k += torch.exp(sim(z_k, out[m]) / tau)
+        
+        # 1 c. Calculate Log-Loss: Applies the negative logarithm (\(\text{-log}\)) to 
+        # the ratio of the numerator and denominator to get the loss value l_k_k_N 
+        # (Normalized Temperature-Scaled Cross Entropy Loss).
+        loss_k = -torch.log(numerator_k / denominator_k)
+
+        # 2. Calculate Loss for the Second Sample in the Pair l(k+N, k): 
+        # Loss for z_k_N using z_k as the positive example
+
+        # 2 a. Calculate Numerator: Computes the similarity between the positive pair (z_k_N and z_k)
+        numerator_k_N = torch.exp(sim(z_k_N, z_k) / tau)
+
+        # 2 b. Calculate Denominator: Sums the temperature-scaled exponentials of the similarity
+        denominator_k_N = 0
+        for m in range(2 * N):
+            if m != k + N:
+                denominator_k_N += torch.exp(sim(z_k_N, out[m]) / tau)
+        
+        # 2 c. Calculate Log-Loss: Applies the negative logarithm to the ratio of the numerator
+        loss_k_N = -torch.log(numerator_k_N / denominator_k_N)
+        # 3. Accumulate Total Loss: Adds both loss values to the total loss for the batch.
+        total_loss += loss_k + loss_k_N      
+
         # ### END CODE HERE ###
         ##############################################################################
         #                               END OF YOUR CODE                             #
@@ -88,6 +132,16 @@ def sim_positive_pairs(out_left, out_right):
     ##############################################################################
 
     # ### START CODE HERE ###
+    N = out_left.shape[0]
+    pos_pairs = torch.zeros(N, 1, device=out_left.device)
+    for k in range(N):
+        z_i = out_left[k]
+        z_j = out_right[k]
+        dot_product = torch.dot(z_i.flatten(), z_j.flatten())
+        norm_i = torch.linalg.norm(z_i, ord=2)
+        norm_j = torch.linalg.norm(z_j, ord=2)
+        norm_dot_product = dot_product / (norm_i * norm_j)
+        pos_pairs[k] = norm_dot_product
     # ### END CODE HERE ###
 
     ##############################################################################
@@ -113,6 +167,11 @@ def compute_sim_matrix(out):
     ##############################################################################
 
     # ### START CODE HERE ###
+    num_samples = out.shape[0]
+    sim_matrix = torch.zeros((num_samples, num_samples), device=out.device)
+    for i in range(num_samples):
+        for j in range(num_samples):
+            sim_matrix[i, j] = sim(out[i], out[j])
     # ### END CODE HERE ###
 
     ##############################################################################
@@ -141,6 +200,7 @@ def simclr_loss_vectorized(out_left, out_right, tau, device="cuda"):
     # Step 1: Use sim_matrix to compute the denominator value for all augmented samples.
     # Hint: Compute e^{sim / tau} and store into exponential, which should have shape 2N x 2N.
     exponential = None
+    exponential = torch.exp(sim_matrix / tau) # [2*N, 2*N]
 
     # This binary mask zeros out terms where k=i.
     mask = (
@@ -153,23 +213,29 @@ def simclr_loss_vectorized(out_left, out_right, tau, device="cuda"):
     exponential = exponential.masked_select(mask).view(2 * N, -1)  # [2*N, 2*N-1]
 
     # Hint: Compute the denominator values for all augmented samples. This should be a 2N x 1 vector.
-    denom = None
+    denom = torch.sum(exponential, dim=1, keepdim=True)  # [2*N, 1]
 
     # Step 2: Compute similarity between positive pairs.
     # You can do this in two ways:
     # Option 1: Extract the corresponding indices from sim_matrix.
     # Option 2: Use sim_positive_pairs().
     # ### START CODE HERE ###
+    sim_pos = None  # [2*N, 1]
+    sim_pos = sim_positive_pairs(out_left, out_right)
+    sim_pos = torch.cat([sim_pos, sim_pos], dim=0)  # [2*N, 1] 
     # ### END CODE HERE ###
 
     # Step 3: Compute the numerator value for all augmented samples.
     numerator = None
     # ### START CODE HERE ###
+    numerator = torch.exp(sim_pos / tau)  # [2*N, 1]
     # ### END CODE HERE ###
 
     # Step 4: Now that you have the numerator and denominator for all augmented samples, compute the total loss.
     loss = None
     # ### START CODE HERE ###
+    individual_loss = -torch.log(numerator / denom) # [2*N, 1]
+    loss = torch.mean(individual_loss)
     # ### END CODE HERE ###
 
     ##############################################################################
