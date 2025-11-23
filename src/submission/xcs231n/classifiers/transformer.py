@@ -99,6 +99,21 @@ class CaptioningTransformer(nn.Module):
         #     along with the tgt_mask. Project the output to scores per token      #
         ############################################################################
         # ### START CODE HERE ###
+        # 1) Embed captions and add positional encoding
+        caption_embeddings = self.embedding(captions)  # (N, T, W)
+        caption_embeddings = self.positional_encoding(caption_embeddings)  # (N, T, W)
+        # Project image features to word vector dimension
+        projected_features = self.visual_projection(features)  # (N, W)
+
+        # 2) Prepare tgt_mask to mask out future timesteps
+        tgt_mask = torch.tril(torch.ones((T, T), device=captions.device)).bool()  # (T, T)
+
+        # 3) Apply the decoder
+        output = self.transformer(
+            tgt=caption_embeddings,
+            memory=projected_features.unsqueeze(1),  # (N, 1, W)
+            tgt_mask=tgt_mask)  # (N, T, W)
+        scores = self.output(output)  # (N, T, V)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -262,6 +277,20 @@ class VisionTransformer(nn.Module):
         # 5. Feed it through a linear layer to produce class logits.              #
         ############################################################################
         # ### START CODE HERE ###
+        # 1. Convert input image into sequence of patch vectors
+        x = self.patch_embed(x)  # (N, num_patches, embed_dim)
+        
+        # 2. Add positional encodings
+        x = self.positional_encoding(x)  # (N, num_patches, embed_dim)
+        
+        # 3. Pass through Transformer encoder
+        x = self.transformer(x)  # (N, num_patches, embed_dim)
+        
+        # 4. Average pool patch vectors
+        x = torch.mean(x, dim=1)  # (N, embed_dim)
+        
+        # 5. Feed through linear layer to produce class logits
+        logits = self.head(x)  # (N, num_classes)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #

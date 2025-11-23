@@ -39,6 +39,24 @@ class PositionalEncoding(nn.Module):
         # less than 5 lines of code.                                               #
         ############################################################################
         # ### START CODE HERE ###
+        # Formula reference:
+        # PE(pos, 2i) = sin(pos / (10000^(2i/embed_dim)))
+        # PE(pos, 2i+1) = cos(pos / (10000^(2i/embed_dim)))
+        
+        # Step 1. Example (if max_len is 5): [[0],,,,] (Shape: (5, 1)) create a clumn vector for positions
+        position = torch.arange(0, max_len).unsqueeze(1)  # Shape: (max_len, 1)
+        
+        # Step 2. Create the div_term for the denominator (Shape: (embed_dim/2,))
+        # torch.arange(0, embed_dim, 2) creates indices for even positions
+        # -math.log(10000.0) / embed_dim is the scaling factor for the exponent which is applied to all even indices
+        # (the inside term is mathematically: 2i * (-ln(10000)/d_model) )
+        # and we apply torch.exp so it becomes e^(2i * (-ln(10000)/d_model))
+        inside_term = torch.arange(0, embed_dim, 2) * (-math.log(10000.0) / embed_dim)
+        div_term = torch.exp(inside_term)  # Shape: (embed_dim/2,)
+        
+        # Step 3. Apply sine function to even indices and cosine to odd indices
+        pe[0, :, 0::2] = torch.sin(position * div_term)  # Apply sine to even indices
+        pe[0, :, 1::2] = torch.cos(position * div_term)  # Apply cosine to odd indices
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -68,6 +86,9 @@ class PositionalEncoding(nn.Module):
         # afterward. This should only take a few lines of code.                    #
         ############################################################################
         # ### START CODE HERE ###
+        # Add positional encoding to input x
+        output = x + self.pe[:, :S, :]
+        output = self.dropout(output)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -160,6 +181,67 @@ class MultiHeadAttention(nn.Module):
         #     function masked_fill may come in handy.                              #
         ############################################################################
         # ### START CODE HERE ###
+        # 1. Apply linear projections to get Q, K, V
+        # Q, K, V have shapes (N, S, E), (N, T, E), (N, T, E) respectively
+        Q = self.query(query)
+        K = self.key(key)
+        V = self.value(value)
+
+        # 2. K: Input data to be used as the key, of shape (N, T, E)
+        # where N is the batch size, T is the target sequence length, and E is the embedding dimension. 
+        # We need to perform calculations independently for each head in a batched manner. 
+        # To do this efficiently with matrix multiplication functions like torch.matmul, 
+        # the Heads (H) dimension needs to be moved after the Batch (N) dimension 
+        # 
+        # After view shape: (Batch Size, Target Sequence Length, Number of Heads, Head Dimension)
+        # Or (N, T, H, E/H)
+        # then after transpose shape: (N, H, T, E/H)
+        Q = Q.view(N, S, self.n_head, self.head_dim).transpose(1, 2)
+        K = K.view(N, T, self.n_head, self.head_dim).transpose(1, 2)
+        V = V.view(N, T, self.n_head, self.head_dim).transpose(1, 2)
+    
+        # 3.Calculate attention scores = (Q @ K.T / sqrt(d_k))        
+        # After transpose(-2, -1), K shape becomes (N, H, E/H, T)
+        # Scores shape: (N, H, S, T)
+        # Scaling factor is square root of the dimension of the keys for a single attention head
+        # It is calculated as dk = d/h where d is embed_dim and h is num_heads (calculated in init)
+        # This scaling factor helps to normalize attention scores and prevent them from growing too large
+        scaling_factor = self.head_dim ** 0.5
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / scaling_factor
+        
+        # 4. Apply the attention mask (if provided) to the scores
+        if attn_mask is not None:
+            # We use float('-inf') to ensure that when softmax is applied,
+            # these masked positions receive a weight of 0.
+            # Because e raised to (-inifinity) is 0.
+            # attn_mask shape: (S, T)
+            # We need to unsqueeze to make it broadcastable to scores shape: (N, H, S, T)
+            scores = scores.masked_fill(attn_mask == 0, float('-inf'))
+        
+        # 5. Apply softmax and dropout. Softmax is applied to last dimension T
+        #    which is target sequence length.
+        #    Result is a tensor of attn_weights shape: (N, H, S, T)
+        #    Dropout is applied to the attention weights to prevent overfitting.
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_weights = self.attn_drop(attn_weights)
+
+        # 6. Apply attention weights to V
+        # The weights calculated in the previous step are used to 
+        # create a weighted average of the Value (V) vectors
+        # output shape: (N, H, S, head_dim)
+        output = torch.matmul(attn_weights, V)
+
+        # 7. Concatenate heads
+        # The individual results from each of the attention heads must be "concatenated"
+        # to return the data to its original embedding dimension size.
+        # Transpose back to (N, S, H, head_dim) and then reshape to (N, S, E)
+        output = output.transpose(1, 2).contiguous().view(N, S, E)
+
+        # 8. Apply final linear projection
+        # Linear transform allows the model to mix the information learned across the 
+        # different heads in a trainable manner
+        # output shape: (N, S, E)
+        output = self.proj(output)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -258,6 +340,18 @@ class TransformerDecoderLayer(nn.Module):
         # same structure as self-attention implemented just above.                 #
         ############################################################################
         # ### START CODE HERE ###
+        # Cross-attention block
+        shortcut = tgt
+        tgt = self.cross_attn(query=tgt, key=memory, value=memory, attn_mask=None)
+        tgt = self.dropout_cross(tgt)
+        tgt = tgt + shortcut
+        tgt = self.norm_cross(tgt)
+        # Feedforward block
+        shortcut = tgt
+        tgt = self.ffn(tgt)
+        tgt = self.dropout_ffn(tgt)
+        tgt = tgt + shortcut
+        tgt = self.norm_ffn(tgt)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -285,7 +379,8 @@ class PatchEmbedding(nn.Module):
         self.patch_size = patch_size
         self.in_channels = in_channels
         self.embed_dim = embed_dim
-
+        
+        #print(img_size, patch_size)
         assert (
             img_size % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
@@ -321,6 +416,44 @@ class PatchEmbedding(nn.Module):
         # using the projection layer.                                              #
         ############################################################################
         # ### START CODE HERE ###
+        # Step 1: Rearrange image into patches
+        #print(f"Input shape: {x.shape}")
+        """ 
+        Here x is of shape (N, C, H, W)
+            N is batch size (num images in the batch), 
+            C is number of channels (for RGB this is 3), 
+            H is height of image, 
+            W is width of image, here H=W=img_size        
+        """
+        height_dim_idx = 2  # Height dimension index
+        width_dim_idx = 3   # Width dimension index
+        # If we set step=self.patch_size, we get non-overlapping patches for Vision transformer
+        patches = x.unfold(height_dim_idx, size=self.patch_size, step=self.patch_size)
+
+        # After first unfold, shape becomes (N, C, num_patches_h, W, patch_size)
+        patches = patches.unfold(width_dim_idx, self.patch_size, self.patch_size)
+        # After second unfold, shape becomes (N, C, num_patches_h, num_patches_w, patch_size, patch_size)
+        # If image size = 16 and patch size = 8 8
+        # Input x shape: torch.Size([2, 3, 16, 16])
+        # Unfolded shape 1: torch.Size([2, 3, 2, 16, 8])
+        # Unfolded shape 2: torch.Size([2, 3, 2, 2, 8, 8])
+        
+        # Step 2: Rearrange dimensions to get patches in the right order
+        # Shape after permute: (N, num_patches_h, num_patches_w, C, patch_size, patch_size)
+        # We did this to safely apply a .reshape() operation to merge the 
+        # last three dimensions into a single patch_dim
+        patches = patches.permute(0, 2, 3, 1, 4, 5)
+        
+        # Step 3: Reshape to get (N, num_patches, patch_dim)
+        patches = patches.reshape(N, self.num_patches, self.patch_dim)
+
+        #print(f"Num images: {N}\nNumber of patches: {self.num_patches}\nPatch dimension: {self.patch_dim}")
+        #print(f"Patches shape before projection: {patches.shape}")
+        
+        # Step 4: Apply linear projection to get embeddings
+        out = self.proj(patches)
+        #print(f"Output shape after projection: {out.shape}")
+
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -369,6 +502,18 @@ class TransformerEncoderLayer(nn.Module):
         # by a feedforward block. This code will be very similar to decoder layer. #
         ############################################################################
         # ### START CODE HERE ###
+        # Self-attention block
+        shortcut = src
+        src = self.self_attn(query=src, key=src, value=src, attn_mask=src_mask)
+        src = self.dropout_self(src)
+        src = src + shortcut
+        src = self.norm_self(src)
+        # Feedforward block
+        shortcut = src
+        src = self.ffn(src)
+        src = self.dropout_ffn(src)
+        src = src + shortcut
+        src = self.norm_ffn(src)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #

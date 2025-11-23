@@ -1,3 +1,6 @@
 *.npz
 *.pyc
+*.pth
 /src/submission/xcs231n/datasets/coco_captioning/
+/src/submission/pretrained_model/
+/src/submission/data/
