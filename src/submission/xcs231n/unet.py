@@ -20,15 +20,20 @@ def default(val, d):
 
 def Upsample(dim, dim_out=None):
     """Upsample the image feature resolution a factor of 2."""
-    return nn.Sequential(
+    module = nn.Sequential(
         nn.Upsample(scale_factor=2, mode="bilinear"),
         nn.Conv2d(dim, default(dim_out, dim), 3, padding=1),
     )
+    # Adding custom attribute to identify upsample layers
+    module.is_upsample = True
+    return module
 
 
 def Downsample(dim, dim_out=None):
     """Downsample the image feature resolution a factor of 2."""
-    return nn.Conv2d(dim, default(dim_out, dim), kernel_size=2, stride=2)
+    module = nn.Conv2d(dim, default(dim_out, dim), kernel_size=2, stride=2)
+    module.is_downsample = True
+    return module
 
 
 class RMSNorm(nn.Module):
@@ -181,6 +186,10 @@ class Unet(nn.Module):
             # load a pretrained checkpoint.
             ##################################################################
             # ### START CODE HERE ###
+            down_block = nn.ModuleList([])
+            down_block.append(ResnetBlock(dim_in, dim_in, context_dim=context_dim))
+            down_block.append(ResnetBlock(dim_in, dim_in, context_dim=context_dim))
+            down_block.append(Downsample(dim_in, dim_out))
             # ### END CODE HERE ###
             ##################################################################
             self.downs.append(down_block)
@@ -206,6 +215,10 @@ class Unet(nn.Module):
             # channels at the input of both ResnetBlocks.
             ##################################################################
             # ### START CODE HERE ###
+            up_block = nn.ModuleList([])
+            up_block.append(Upsample(dim_in, dim_out))
+            up_block.append(ResnetBlock(dim_out * 2, dim_out, context_dim=context_dim))
+            up_block.append(ResnetBlock(dim_out * 2, dim_out, context_dim=context_dim))
             # ### END CODE HERE ###
             self.ups.append(up_block)
             ##################################################################
@@ -229,6 +242,16 @@ class Unet(nn.Module):
         # For unconditional sampling, pass None in`text_emb`.
         ##################################################################
         # ### START CODE HERE ###
+        # Step 1. Get conditional output
+        conditional_output = self.forward(x, time, model_kwargs=model_kwargs)
+
+        # Step 2. Get unconditional output
+        model_kwargs["text_emb"] = None
+        unconditional_output = self.forward(x, time, model_kwargs=model_kwargs)
+
+        # Step 3. Combine using this formula
+        # x = (cfg_scale + 1) * cond_output - cfg_scale * uncond_output
+        x = (cfg_scale + 1) * conditional_output - cfg_scale * unconditional_output
         # ### END CODE HERE ###
         ##################################################################
 
@@ -286,6 +309,27 @@ class Unet(nn.Module):
         ##################################################################
 
         # ### START CODE HERE ###
+        # 1. Downsampling step
+        skip_connections = []
+        for down_block in self.downs:
+            for layer in down_block:
+                if isinstance(layer, ResnetBlock):
+                    x = layer(x, context=context)
+                    skip_connections.append(x)
+                elif hasattr(layer, 'is_downsample'):
+                    x = layer(x)
+        # 2. Middle blocks
+        x = self.mid_block1(x, context=context)
+        x = self.mid_block2(x, context=context)
+        # 3. Upsampling step
+        for up_block in self.ups:
+            for layer in up_block:
+                if hasattr(layer, 'is_upsample'):
+                    x = layer(x)
+                elif isinstance(layer, ResnetBlock):
+                    skip_x = skip_connections.pop()
+                    x = torch.cat((x, skip_x), dim=1)  # Concatenate along channel dimension
+                    x = layer(x, context=context)
         # ### END CODE HERE ###
         ##################################################################
 

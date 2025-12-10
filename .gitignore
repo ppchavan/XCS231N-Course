@@ -1,3 +1,4 @@
 *.npz
 *.pyc
 src/submission/xcs231n/datasets/
+src/submission/results/
