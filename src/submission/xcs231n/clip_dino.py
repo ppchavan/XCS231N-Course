@@ -26,6 +26,13 @@ def get_similarity_no_loop(text_features, image_features):
     # TODO: Compute the cosine similarity. Do NOT use for loops.               #
     ############################################################################
     # ### START CODE HERE ###
+    # Step 1. Normalize the feature vectors along the feature dimension (D)
+    # F.normalize computes A / ||A|| and B / ||B||
+    text_features_norm = nn.functional.normalize(text_features, dim=1)
+    image_features_norm = nn.functional.normalize(image_features, dim=1)
+
+    # Step 2. we need to multiply the two normalized matrices to get the cosine of theta
+    similarity = torch.matmul(text_features_norm, image_features_norm.T)
     # ### END CODE HERE ###
     ############################################################################
     #                             END OF YOUR CODE                             #
@@ -63,6 +70,57 @@ def clip_zero_shot_classifier(clip_model, clip_preprocess, images,
     # TODO: Find the class labels for images.                                  #
     ############################################################################
     # ### START CODE HERE ###
+    """
+        1. Preprocess and Encode the Images
+        prepare the input images for the CLIP model's image encoder.
+        Encode: Pass the processed images through the clip_model.encode_image() method.
+        Normalize: Normalize the resulting image features (CLIP features are expected to be L2-normalized before similarity calculation).
+        
+        2. Preprocess and Encode the Text Classes
+        Prepare the list of class names into tokens that CLIP understands.
+        Tokenize: Use clip.tokenize()
+        Encode: Pass the tokenized text through the clip_model.encode_text() method.
+        Normalize: Normalize the resulting text features.
+        
+        3. Calculate Cosine Similarity (Logits)
+        The final classification score is the pairwise cosine similarity scaled by a temperature parameter internal to the CLIP model.
+        Calculate similarity: Perform matrix multiplication (dot product) between the normalized image features 
+        and the transposed normalized text features.
+        Apply temperature: Multiply the similarity matrix by clip_model.logit_scale.exp()
+    """
+    # Step 1: Preprocess and Encode the Images
+    processed_images = [
+        clip_preprocess(Image.fromarray(img)).unsqueeze(0)
+        for img in images
+    ]
+    images_tensor = torch.cat(processed_images, dim=0).to(device)
+
+    with torch.no_grad():
+        image_features = clip_model.encode_image(images_tensor)
+    
+    print(f"Shape of image_features = {image_features.shape}")
+    # Step 2: Preprocess and encode text classes
+    text_tokens = clip.tokenize(class_texts).to(device)
+    with torch.no_grad():
+        text_features = clip_model.encode_text(text_tokens)
+    print(f"Shape of text_features = {text_features.shape}")
+
+    # Step 3. Compute cosine similarity between normalized image and text features
+    #         For this, we can use get_similarity_no_loop function above.
+    # Calculate cosine similarity
+    # M: image_features dimension is 10x512
+    # N: text_features dimension is 5x512
+    # Cosine similarity operation is M x N_transpose, so resulting matrix dimension is 10x5
+    cosine_similarity_score = get_similarity_no_loop(text_features=text_features,
+                                               image_features=image_features).T
+    print(cosine_similarity_score)
+    # Create a 1D tensor with max index of each row value
+    # So this will contain 10 indices
+    indices_of_max_score = cosine_similarity_score.argmax(1)
+    class_text_arr = np.array(class_texts)
+    numpy_arr = indices_of_max_score.cpu().numpy()
+    pred_classes = class_text_arr[numpy_arr]
+
     # ### END CODE HERE ###
     ############################################################################
     #                             END OF YOUR CODE                             #
@@ -92,6 +150,17 @@ class CLIPImageRetriever:
         # similarity function for most compute-optimal implementation.#
         ############################################################################
         # ### START CODE HERE ###
+        self.clip_model = clip_model
+        self.clip_preprocess = clip_preprocess
+        self.device = device
+        
+        # Preprocess and encode all images at once
+        processed_images = [
+            clip_preprocess(Image.fromarray(img)).unsqueeze(0)
+            for img in images
+        ]
+        images_tensor = torch.cat(processed_images, dim=0).to(device)
+        self.image_features = clip_model.encode_image(images_tensor)
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -116,6 +185,16 @@ class CLIPImageRetriever:
         # TODO: Retrieve the indices of top-k images.                              #
         ############################################################################
         # ### START CODE HERE ###
+        # Tokenize and encode the query text
+        text_tokens = clip.tokenize([query]).to(self.device)
+        text_features = self.clip_model.encode_text(text_tokens)
+        
+        # Compute cosine similarity between query and all images
+        similarities = get_similarity_no_loop(text_features, self.image_features)
+        
+        # Get top-k indices
+        _, top_indices_tensor = similarities[0].topk(k)
+        top_indices = top_indices_tensor.cpu().numpy().tolist()
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -233,6 +312,22 @@ class DINOSegmentation:
         # It can be a linear layer or two layer neural network.                    #
         ############################################################################
         # ### START CODE HERE ###
+        self.inp_dim = inp_dim
+        self.device = device
+        self.num_classes = num_classes
+        hidden_dim = 128 # A common choice for a small MLP head
+       
+        self.model = nn.Sequential(
+            nn.Linear(self.inp_dim, hidden_dim), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim, self.num_classes)
+        ).to(self.device)
+
+        self.criterion = nn.CrossEntropyLoss()
+
+        # 3. Define the Optimizer
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr = 0.0005)
+
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -251,6 +346,24 @@ class DINOSegmentation:
         # TODO: Train your model for `num_iters` steps.                            #
         ############################################################################
         # ### START CODE HERE ###
+        for iter in range(num_iters):
+            # Zero the gradients
+            self.optimizer.zero_grad()
+
+            # Forward pass: compute predicted outputs by passing inputs to the model
+            outputs = self.model(X_train)
+
+            # Compute the loss
+            loss = self.criterion(outputs, Y_train)
+
+            # Backward pass: compute gradient of the loss with respect to model parameters
+            loss.backward()
+
+            # Perform a single optimization step (parameter update)
+            self.optimizer.step()
+
+            if (iter + 1) % 100 == 0:
+                print(f"Iteration [{iter + 1}/{num_iters}], Loss: {loss.item():.4f}")
         # ### END CODE HERE ###
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -272,3 +385,9 @@ class DINOSegmentation:
         # TODO: Train your model for `num_iters` steps.                            #
         ############################################################################
         # ### START CODE HERE ###
+        outputs = self.model(X_test)
+        _, pred_classes = torch.max(outputs, dim=1)
+        # ### END CODE HERE ###
+        ############################################################################
+        return pred_classes
+    
