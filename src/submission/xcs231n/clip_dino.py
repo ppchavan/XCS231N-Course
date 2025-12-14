@@ -119,7 +119,7 @@ def clip_zero_shot_classifier(clip_model, clip_preprocess, images,
     indices_of_max_score = cosine_similarity_score.argmax(1)
     class_text_arr = np.array(class_texts)
     numpy_arr = indices_of_max_score.cpu().numpy()
-    pred_classes = class_text_arr[numpy_arr]
+    pred_classes = class_text_arr[numpy_arr].tolist()
 
     # ### END CODE HERE ###
     ############################################################################
